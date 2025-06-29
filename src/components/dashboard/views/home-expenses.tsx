@@ -17,6 +17,7 @@ import {
   Pencil,
   Trash2,
   Users,
+  FileText,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useState } from "react";
@@ -25,6 +26,13 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useAuth } from "@/lib/auth-no-jsx";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import Image from "next/image";
 
 export function HomeExpenses() {
   const { token, user } = useAuth();
@@ -35,6 +43,7 @@ export function HomeExpenses() {
     date: string;
     description?: string;
   } | null>(null);
+  const [viewingReceipt, setViewingReceipt] = useState<string | null>(null);
   const { toast } = useToast();
 
   const expenses = useQuery(
@@ -178,8 +187,26 @@ export function HomeExpenses() {
                         <Badge variant="outline" className="text-xs">
                           {format(new Date(expense.date), "MMM dd, yyyy")}
                         </Badge>
+                        {expense.receiptUrl && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setViewingReceipt(expense.receiptUrl!)
+                            }
+                            className="h-6 px-2"
+                          >
+                            <FileText className="h-3 w-3 mr-1" />
+                            Receipt
+                          </Button>
+                        )}
                       </div>
                       <p className="text-sm mb-1">{expense.purpose}</p>
+                      {expense.description && (
+                        <p className="text-xs text-muted-foreground mb-1">
+                          {expense.description}
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground">
                         Added {format(new Date(expense.createdAt), "PPp")}
                       </p>
@@ -227,6 +254,50 @@ export function HomeExpenses() {
           open={!!editingExpense}
           onOpenChange={(open) => !open && setEditingExpense(null)}
         />
+      )}
+
+      {viewingReceipt && (
+        <Dialog
+          open={!!viewingReceipt}
+          onOpenChange={(open) => !open && setViewingReceipt(null)}
+        >
+          <DialogContent className="max-w-4xl max-h-[90vh]">
+            <DialogHeader>
+              <DialogTitle>Receipt</DialogTitle>
+            </DialogHeader>
+            <div className="flex justify-center">
+              <Image
+                src={viewingReceipt || "/placeholder.svg"}
+                alt="Receipt"
+                width={800}
+                height={600}
+                className="max-w-full max-h-[70vh] object-contain"
+                onError={(e) => {
+                  // If image fails to load, show as PDF or document
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = "none";
+                  const container = target.parentElement;
+                  if (container) {
+                    container.innerHTML = `
+        <div class="flex flex-col items-center justify-center p-8">
+          <div class="h-16 w-16 text-muted-foreground mb-4 flex items-center justify-center">
+            <svg class="h-16 w-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+          </div>
+          <p class="text-muted-foreground mb-4">Cannot preview this file type</p>
+          <a href="${viewingReceipt}" target="_blank" rel="noopener noreferrer" 
+             class="inline-flex items-center px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90">
+            Open in New Tab
+          </a>
+        </div>
+      `;
+                  }
+                }}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

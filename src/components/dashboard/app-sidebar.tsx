@@ -11,6 +11,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -77,11 +78,24 @@ export function AppSidebar({
   onViewChange,
 }: AppSidebarProps) {
   const { user, logout } = useAuth();
+  const { setOpenMobile, isMobile } = useSidebar();
 
   if (!user) return null;
 
   const handleViewChange = (viewId: string) => {
     onViewChange?.(viewId);
+    // Close sidebar on mobile after selection
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    // Close sidebar before logout
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    await logout();
   };
 
   return (
@@ -106,6 +120,7 @@ export function AppSidebar({
                   <SidebarMenuButton
                     onClick={() => handleViewChange(item.id)}
                     isActive={activeView === item.id}
+                    className="transition-colors duration-200 hover:bg-sidebar-accent"
                   >
                     <item.icon className="h-4 w-4" />
                     <span>{item.title}</span>
@@ -126,6 +141,7 @@ export function AppSidebar({
                     <SidebarMenuButton
                       onClick={() => handleViewChange(item.id)}
                       isActive={activeView === item.id}
+                      className="transition-colors duration-200 hover:bg-sidebar-accent"
                     >
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
@@ -143,9 +159,9 @@ export function AppSidebar({
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <SidebarMenuButton>
+                <SidebarMenuButton className="hover:bg-sidebar-accent transition-colors duration-200">
                   <Avatar className="h-6 w-6">
-                    <AvatarFallback className="text-xs">
+                    <AvatarFallback className="text-xs bg-blue-100 text-blue-700">
                       {user.name.charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
@@ -162,7 +178,10 @@ export function AppSidebar({
                 side="top"
                 className="w-[--radix-popper-anchor-width]"
               >
-                <DropdownMenuItem onClick={logout}>
+                <DropdownMenuItem
+                  onClick={handleLogout}
+                  className="text-red-600 focus:text-red-600"
+                >
                   <LogOut className="h-4 w-4 mr-2" />
                   <span>Sign out</span>
                 </DropdownMenuItem>

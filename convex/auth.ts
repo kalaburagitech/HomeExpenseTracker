@@ -9,7 +9,6 @@ export const register = mutation({
     contactNo: v.string(),
     password: v.string(),
     role: v.union(v.literal("admin"), v.literal("user")),
-    createdBy: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
     // Check if user already exists
@@ -22,21 +21,37 @@ export const register = mutation({
       throw new Error("User with this contact number already exists")
     }
 
-    // Create user
-    const userId = await ctx.db.insert("users", {
-      ...args,
+    // Create home first without createdBy (it's optional now)
+    const homeId = await ctx.db.insert("homes", {
+      name: args.homeName,
       createdAt: Date.now(),
     })
 
-    // Create session token
-    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+    // Now create the user with the homeId
+    const userId = await ctx.db.insert("users", {
+      name: args.name,
+      lastName: args.lastName,
+      contactNo: args.contactNo,
+      password: args.password,
+      role: args.role,
+      homeId: homeId,
+      createdAt: Date.now(),
+    })
+
+    // Update the home with the createdBy user ID
+    await ctx.db.patch(homeId, {
+      createdBy: userId,
+    })
+
+    // Create session
+    const token = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     await ctx.db.insert("sessions", {
-      userId,
-      token,
+      userId: userId,
+      token: token,
       expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
     })
 
-    return { userId, token }
+    return { token }
   },
 })
 
@@ -55,15 +70,15 @@ export const login = mutation({
       throw new Error("Invalid credentials")
     }
 
-    // Create session token
-    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+    // Create new session
+    const token = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     await ctx.db.insert("sessions", {
       userId: user._id,
-      token,
+      token: token,
       expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
     })
 
-    return { user, token }
+    return { token }
   },
 })
 
@@ -80,7 +95,14 @@ export const getCurrentUser = query({
     }
 
     const user = await ctx.db.get(session.userId)
-    return user
+    if (!user) return null
+
+    const home = await ctx.db.get(user.homeId)
+
+    return {
+      ...user,
+      homeName: home?.name || "Unknown Home",
+    }
   },
 })
 

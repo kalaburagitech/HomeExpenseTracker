@@ -7,6 +7,8 @@ export const addExpense = mutation({
     date: v.string(),
     purpose: v.string(),
     amount: v.number(),
+    description: v.optional(v.string()),
+    receiptFileId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {
     const session = await ctx.db
@@ -22,9 +24,12 @@ export const addExpense = mutation({
     return await ctx.db.insert("expenses", {
       userId: user._id,
       userName: user.name,
+      homeId: user.homeId,
       date: args.date,
       purpose: args.purpose,
       amount: args.amount,
+      description: args.description,
+      receiptFileId: args.receiptFileId,
       createdAt: Date.now(),
     })
   },
@@ -43,16 +48,36 @@ export const getUserExpenses = query({
 
     if (!session) throw new Error("Unauthorized")
 
+    const user = await ctx.db.get(session.userId)
+    if (!user) throw new Error("User not found")
+
     let expenses = await ctx.db
       .query("expenses")
       .withIndex("by_user", (q) => q.eq("userId", session.userId))
       .collect()
 
+    // Filter by home to ensure data isolation
+    expenses = expenses.filter((expense) => expense.homeId === user.homeId)
+
     if (args.month) {
       expenses = expenses.filter((expense) => expense.date.startsWith(args.month!))
     }
 
-    return expenses.sort((a, b) => b.createdAt - a.createdAt)
+    // Add receipt URLs if they exist
+    const expensesWithReceipts = await Promise.all(
+      expenses.map(async (expense) => {
+        let receiptUrl = null
+        if (expense.receiptFileId) {
+          receiptUrl = await ctx.storage.getUrl(expense.receiptFileId)
+        }
+        return {
+          ...expense,
+          receiptUrl,
+        }
+      }),
+    )
+
+    return expensesWithReceipts.sort((a, b) => b.createdAt - a.createdAt)
   },
 })
 
@@ -66,8 +91,30 @@ export const getAllExpenses = query({
 
     if (!session) throw new Error("Unauthorized")
 
-    const expenses = await ctx.db.query("expenses").collect()
-    return expenses.sort((a, b) => b.createdAt - a.createdAt)
+    const user = await ctx.db.get(session.userId)
+    if (!user) throw new Error("User not found")
+
+    // Only return expenses from the same home
+    const expenses = await ctx.db
+      .query("expenses")
+      .withIndex("by_home", (q) => q.eq("homeId", user.homeId))
+      .collect()
+
+    // Add receipt URLs if they exist
+    const expensesWithReceipts = await Promise.all(
+      expenses.map(async (expense) => {
+        let receiptUrl = null
+        if (expense.receiptFileId) {
+          receiptUrl = await ctx.storage.getUrl(expense.receiptFileId)
+        }
+        return {
+          ...expense,
+          receiptUrl,
+        }
+      }),
+    )
+
+    return expensesWithReceipts.sort((a, b) => b.createdAt - a.createdAt)
   },
 })
 
@@ -78,7 +125,8 @@ export const updateExpense = mutation({
     date: v.string(),
     purpose: v.string(),
     amount: v.number(),
-    description:v.string(),
+    description: v.string(),
+    receiptFileId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {
     const session = await ctx.db
@@ -94,6 +142,11 @@ export const updateExpense = mutation({
     const expense = await ctx.db.get(args.expenseId)
     if (!expense) throw new Error("Expense not found")
 
+    // Ensure expense belongs to the same home
+    if (expense.homeId !== user.homeId) {
+      throw new Error("Access denied")
+    }
+
     // Only admin or expense owner can update
     if (user.role !== "admin" && expense.userId !== user._id) {
       throw new Error("Permission denied")
@@ -103,7 +156,8 @@ export const updateExpense = mutation({
       date: args.date,
       purpose: args.purpose,
       amount: args.amount,
-      description:args.description,
+      description: args.description,
+      receiptFileId: args.receiptFileId,
     })
   },
 })
@@ -127,9 +181,19 @@ export const deleteExpense = mutation({
     const expense = await ctx.db.get(args.expenseId)
     if (!expense) throw new Error("Expense not found")
 
+    // Ensure expense belongs to the same home
+    if (expense.homeId !== user.homeId) {
+      throw new Error("Access denied")
+    }
+
     // Only admin can delete
     if (user.role !== "admin") {
       throw new Error("Admin access required")
+    }
+
+    // Delete associated receipt file if exists
+    if (expense.receiptFileId) {
+      await ctx.storage.delete(expense.receiptFileId)
     }
 
     return await ctx.db.delete(args.expenseId)
@@ -137,7 +201,10 @@ export const deleteExpense = mutation({
 })
 
 export const getExpenseStats = query({
-  args: { token: v.string() },
+  args: {
+    token: v.string(),
+    month: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const session = await ctx.db
       .query("sessions")
@@ -146,23 +213,42 @@ export const getExpenseStats = query({
 
     if (!session) throw new Error("Unauthorized")
 
-    const expenses = await ctx.db.query("expenses").collect()
-    const users = await ctx.db.query("users").collect()
+    const user = await ctx.db.get(session.userId)
+    if (!user) throw new Error("User not found")
+
+    // Only get expenses and users from the same home
+    let expenses = await ctx.db
+      .query("expenses")
+      .withIndex("by_home", (q) => q.eq("homeId", user.homeId))
+      .collect()
+
+    // Filter by month if provided
+    if (args.month) {
+      expenses = expenses.filter((expense) => expense.date.startsWith(args.month!))
+    }
+
+    const users = await ctx.db
+      .query("users")
+      .withIndex("by_home", (q) => q.eq("homeId", user.homeId))
+      .collect()
 
     // Calculate stats
     const totalAmount = expenses.reduce((sum, expense) => sum + expense.amount, 0)
-    const userStats = users.map((user) => {
-      const userExpenses = expenses.filter((expense) => expense.userId === user._id)
+
+    const userStats = users.map((homeUser) => {
+      const userExpenses = expenses.filter((expense) => expense.userId === homeUser._id)
       const userTotal = userExpenses.reduce((sum, expense) => sum + expense.amount, 0)
+
       return {
-        userId: user._id,
-        name: user.name,
+        userId: homeUser._id,
+        name: homeUser.name,
         totalPaid: userTotal,
         expenseCount: userExpenses.length,
       }
     })
 
     const averagePerPerson = totalAmount / users.length
+
     const settlements = userStats.map((stat) => ({
       ...stat,
       shouldPay: averagePerPerson,
@@ -178,7 +264,7 @@ export const getExpenseStats = query({
   },
 })
 
-function getMonthlyData(expenses: any[]) {
+function getMonthlyData(expenses: Array<{ date: string; amount: number }>) {
   const monthlyMap = new Map()
 
   expenses.forEach((expense) => {
@@ -196,3 +282,15 @@ function getMonthlyData(expenses: any[]) {
     }))
     .sort((a, b) => a.month.localeCompare(b.month))
 }
+
+// File upload helper
+export const generateUploadUrl = mutation(async (ctx) => {
+  return await ctx.storage.generateUploadUrl()
+})
+
+export const getFileUrl = query({
+  args: { fileId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    return await ctx.storage.getUrl(args.fileId)
+  },
+})

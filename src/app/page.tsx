@@ -1,10 +1,7 @@
 "use client";
 
 import { LoginForm } from "@/components/auth/login-form";
-import { RegisterForm } from "@/components/auth/register-form";
 import { Dashboard } from "@/components/dashboard/dashboard";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -16,7 +13,6 @@ import { useAuth } from "@/lib/auth-no-jsx";
 
 export default function Home() {
   const { user, loading } = useAuth();
-  const [showRegister, setShowRegister] = useState(false);
 
   if (loading) {
     return (
@@ -38,29 +34,18 @@ export default function Home() {
             <CardTitle className="text-2xl font-bold text-gray-900">
               Home Expense Tracker
             </CardTitle>
-            <CardDescription>
-              {showRegister
-                ? "Create your admin account"
-                : "Sign in to your account"}
-            </CardDescription>
+            <CardDescription>Sign in to your account</CardDescription>
           </CardHeader>
-          <CardContent>
-            {showRegister ? (
-              <RegisterForm onSuccess={() => setShowRegister(false)} />
-            ) : (
-              <LoginForm />
-            )}
-            <div className="mt-4 text-center">
-              <Button
-                variant="link"
-                onClick={() => setShowRegister(!showRegister)}
-                className="text-sm"
-              >
-                {showRegister
-                  ? "Already have an account? Sign in"
-                  : "Need to create an admin account? Register"}
-              </Button>
-            </div>
+          <CardContent className="space-y-6">
+            <LoginForm />
+            {/* <div className="text-center">
+              <Link href="/register">
+                <Button variant="outline" className="w-full bg-transparent">
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Create Admin Account
+                </Button>
+              </Link>
+            </div> */}
           </CardContent>
         </Card>
       </div>

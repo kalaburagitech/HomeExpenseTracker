@@ -1,26 +1,6 @@
 import { mutation, query } from "./_generated/server"
 import { v } from "convex/values"
 
-export const getAllUsers = query({
-  args: { token: v.string() },
-  handler: async (ctx, args) => {
-    // Verify admin access
-    const session = await ctx.db
-      .query("sessions")
-      .withIndex("by_token", (q) => q.eq("token", args.token))
-      .first()
-
-    if (!session) throw new Error("Unauthorized")
-
-    const user = await ctx.db.get(session.userId)
-    if (!user || user.role !== "admin") {
-      throw new Error("Admin access required")
-    }
-
-    return await ctx.db.query("users").collect()
-  },
-})
-
 export const addUser = mutation({
   args: {
     token: v.string(),
@@ -31,7 +11,6 @@ export const addUser = mutation({
     password: v.string(),
   },
   handler: async (ctx, args) => {
-    // Verify admin access
     const session = await ctx.db
       .query("sessions")
       .withIndex("by_token", (q) => q.eq("token", args.token))
@@ -54,15 +33,39 @@ export const addUser = mutation({
       throw new Error("User with this contact number already exists")
     }
 
+    // Create user in the same home as admin
     return await ctx.db.insert("users", {
       name: args.name,
-      homeName: args.homeName,
       lastName: args.lastName,
       contactNo: args.contactNo,
       password: args.password,
-      role: "user" as const,
+      role: "user",
+      homeId: admin.homeId,
       createdBy: admin._id,
       createdAt: Date.now(),
     })
+  },
+})
+
+export const getAllUsers = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const session = await ctx.db
+      .query("sessions")
+      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .first()
+
+    if (!session) throw new Error("Unauthorized")
+
+    const user = await ctx.db.get(session.userId)
+    if (!user) throw new Error("User not found")
+
+    // Only return users from the same home
+    const users = await ctx.db
+      .query("users")
+      .withIndex("by_home", (q) => q.eq("homeId", user.homeId))
+      .collect()
+
+    return users.sort((a, b) => b.createdAt - a.createdAt)
   },
 })
